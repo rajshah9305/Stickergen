@@ -1,1 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Weed Sticker Generator</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:#000;color:#eee;margin:0;display:flex;flex-direction:column;align-items:center;padding:2rem}
+h1{margin:0 0 .5em;font-weight:700;letter-spacing:-.03em}
+input[type=text]{width:280px;padding:.6em 1em;font-size:1.1em;border:none;border-radius:6px}
+button{margin:.8em 0 1.2em;padding:.6em 1.4em;font-size:1.1em;border:none;border-radius:6px;background:#00e676;color:#000;font-weight:700;cursor:pointer}
+button:disabled{opacity:.5;cursor:not-allowed}
+canvas{border-radius:12px;box-shadow:0 8px 24px #0008}
+#info{font-size:.85em;color:#aaa;margin-top:.8em}
+#seed{font-family:monospace;background:#222;padding:.2em .4em;border-radius:4px}
+</style>
+</head>
+<body>
+<h1>∞ Weed Sticker Generator</h1>
+<input id="prompt" type="text" placeholder="Type anything…" autocomplete="off"/>
+<button id="go">Generate 1-of-1 Sticker</button>
+<canvas id="cv" width="1024" height="1024" style="max-width:100%;height:auto"></canvas>
+<div id="info">Seed: <span id="seed">-</span> | <button id="dl">Download PNG</button></div>
 
+<script>
+/* ---------- tiny deterministic hash (fallback) ---------- */
+function djb2(str){
+  let h=5381
+  for(let i=0;i<str.length;i++)h=((h<<5)+h+str.charCodeAt(i))&0xffffffff
+  return h
+}
+function randomSeed(){return Math.floor(Math.random()*0xffffffff)}
+
+/* ---------- tiny PRNG ---------- */
+function mulberry32(a){return function(){let t=a+=0x6D2B79F5;t=Math.imul(t^t>>>15,1|t);t^=t+Math.imul(t^t>>>7,61|t);return((t^t>>>14)>>>0)/4294967296}}
+
+/* ---------- color / draw helpers ---------- */
+function hsl(h,s,l){return`hsl(${h%360} ${s}% ${l}%)`}
+function randRange(rng,min,max){return rng()*(max-min)+min}
+function drawLeaf(ctx,rng,x,y,len,tilt){
+  ctx.save();ctx.translate(x,y);ctx.rotate(tilt)
+  ctx.beginPath();ctx.moveTo(0,0)
+  const seg=7
+  for(let i=1;i<=seg;i++){
+    const t=i/seg,wave=Math.sin(t*Math.PI)*len,wobble=Math.sin(t*Math.PI*3+rng()*6.28)*len*.08
+    ctx.quadraticCurveTo(wobble,-wave*.6,t===1?0:-wave,-wave)
+  }
+  ctx.quadraticCurveTo(len*.2,-len*.9,0,-len)
+  ctx.quadraticCurveTo(-len*.2,-len*.9,0,0)
+  ctx.closePath();ctx.fill();ctx.restore()
+}
+
+/* ---------- main generator ---------- */
+async function generate(){
+  const prompt=document.getElementById('prompt').value.trim()||'sticky icky'
+  const seedVal=randomSeed()                                // 32-bit entropy
+  const seedBytes=new Uint8Array(4)
+  new DataView(seedBytes.buffer).setUint32(0,seedVal)
+  const seedInt=seedVal
+  const rng=mulberry32(seedInt)
+  document.getElementById('seed').textContent=seedInt.toString(16).padStart(8,'0')
+
+  const cv=document.getElementById('cv')
+  const ctx=cv.getContext('2d')
+  const w=cv.width,h=cv.height
+  ctx.clearRect(0,0,w,h)
+
+  /* background gradient */
+  const g=ctx.createRadialGradient(w/2,h/2,0,w/2,h/2,w*.7)
+  const hue1=randRange(rng,90,150),hue2=(hue1+randRange(rng,40,80))%360
+  g.addColorStop(0,hsl(hue1,60,5))
+  g.addColorStop(.5,hsl(hue2,70,12))
+  g.addColorStop(1,hsl(hue1,50,2))
+  ctx.fillStyle=g;ctx.fillRect(0,0,w,h)
+
+  /* central bud */
+  const cx=w/2,cy=h/2,budR=randRange(rng,160,220)
+  const budGrad=ctx.createRadialGradient(cx,cy-budR*.3,0,cx,cy,budR)
+  budGrad.addColorStop(0,hsl(randRange(rng,80,130),80,60))
+  budGrad.addColorStop(.7,hsl(randRange(rng,90,140),75,35))
+  budGrad.addColorStop(1,hsl(randRange(rng,100,150),70,15))
+  ctx.fillStyle=budGrad
+  ctx.beginPath();ctx.arc(cx,cy,budR,0,Math.PI*2);ctx.fill()
+
+  /* leaves */
+  const leafCount=Math.floor(randRange(rng,5,9)),leafLen=randRange(rng,budR*.8,budR*1.4)
+  ctx.globalCompositeOperation='multiply'
+  for(let i=0;i<leafCount;i++){
+    const angle=(i/leafCount)*Math.PI*2+randRange(rng,-.3,.3)
+    const x=cx+Math.cos(angle)*(budR*.6),y=cy+Math.sin(angle)*(budR*.6)
+    ctx.fillStyle=hsl(randRange(rng,70,160),65,randRange(rng,25,45))
+    drawLeaf(ctx,rng,x,y,leafLen,angle+Math.PI/2+randRange(rng,-.4,.4))
+  }
+  ctx.globalCompositeOperation='source-over'
+
+  /* glitch bars */
+  const barCount=Math.floor(randRange(rng,3,7))
+  for(let i=0;i<barCount;i++){
+    ctx.fillStyle=`hsla(${randRange(rng,60,180)},90%,60%,${randRange(rng,.15,.35)})`
+    const y=randRange(rng,0,h),hh=randRange(rng,8,40)
+    ctx.fillRect(0,y,w,hh)
+  }
+
+  /* vignette */
+  const v=ctx.createRadialGradient(w/2,h/2,w*.3,w/2,h/2,w*.8)
+  v.addColorStop(0,'rgba(0,0,0,0)');v.addColorStop(1,'rgba(0,0,0,.6)')
+  ctx.fillStyle=v;ctx.fillRect(0,0,w,h)
+}
+
+/* ---------- download ---------- */
+document.getElementById('dl').addEventListener('click',()=>{
+  const cv=document.getElementById('cv')
+  cv.toBlob(blob=>{
+    const a=document.createElement('a')
+    a.href=URL.createObjectURL(blob)
+    a.download='weed-sticker_'+document.getElementById('seed').textContent+'.png'
+    a.click()
+  })
+})
+
+/* ---------- ui glue ---------- */
+document.getElementById('go').addEventListener('click',()=>{
+  document.getElementById('go').disabled=true
+  generate();document.getElementById('go').disabled=false
+})
+document.getElementById('prompt').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('go').click()})
+</script>
+</body>
+</html>
